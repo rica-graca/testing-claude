@@ -204,7 +204,6 @@ function getCodebaseContext() {
 async function generateImplementation(story, codebaseContext) {
   if (MOCK_MODE) {
     console.log('[coder] Bypassing Claude API -> generating mock implementation...');
-    // A small delay to simulate generation time
     await new Promise(resolve => setTimeout(resolve, 1500));
     
     return {
@@ -218,23 +217,27 @@ async function generateImplementation(story, codebaseContext) {
     };
   }
 
+  // UPDATED SYSTEM PROMPT: Uses robust XML tags instead of fragile JSON strings
   const systemPrompt = `You are an automated elite software engineer. 
 Your objective is to read the target User Story, analyze the existing codebase context, and write the necessary additions or revisions to satisfy all acceptance criteria.
 
 Maintain architectural consistency, ensure variables match, and write clean, idiomatic code (.go or .js).
 
-You MUST respond with a valid JSON object matching the schema below. Do NOT wrap it in any conversational introduction/outro prose. Respond ONLY with the raw JSON.
+CRITICAL OUTPUT FORMAT:
+You MUST respond using the exact XML-like blocks below. Do NOT output JSON. 
 
-Output JSON Schema:
-{
-  "explanation": "A summary of what changes were implemented and how the architectural requirements were handled.",
-  "files": [
-    {
-      "path": "The relative path of the file to create/overwrite from project root (e.g. 'internal/reclamation/reclamation.go').",
-      "content": "The complete, clean new content of the file."
-    }
-  ]
-}`;
+1. Provide an explanation wrapped in <explanation> tags.
+2. Provide each file's code wrapped in <file path="relative/path/here.ext"> tags.
+
+Example Response:
+<explanation>
+Added the new endpoints to handle the reclamation logic.
+</explanation>
+
+<file path="internal/reclamation/reclamation.go">
+package reclamation
+// your code here
+</file>`;
 
   const userPrompt = `### User Story to Implement
 Title: [${story.id}] ${story.title}
@@ -248,14 +251,14 @@ Provide your changes.`;
 
   const fallbackSequence = [
     process.env.CLAUDE_MODEL,
-    'claude-opus-4-5', // <--- Mapped directly from your working refiner.js script
+    'claude-opus-4-5',
     'claude-3-7-sonnet-latest',
     'claude-3-5-sonnet-latest',
     'claude-3-5-sonnet-20241022',
     'claude-3-5-sonnet-20240620',
     'claude-3-5-haiku-latest',
     'claude-3-haiku-20240307'
-  ].filter(Boolean); // Remove undefined/null
+  ].filter(Boolean);
 
   let lastError = null;
 
@@ -272,11 +275,26 @@ Provide your changes.`;
 
       const raw = msg.content.map(b => b.text || '').join('');
       
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error(`Claude response did not contain a valid JSON object block.`);
+      // NEW PARSING LOGIC: Safely extract explanation and files from XML-style blocks
+      const explanationMatch = raw.match(/<explanation>([\s\S]*?)<\/explanation>/i);
+      const explanation = explanationMatch ? explanationMatch[1].trim() : 'No explanation provided.';
 
-      const clean = jsonMatch[0].trim();
-      return JSON.parse(clean);
+      const files = [];
+      const fileRegex = /<file\s+path=["']([^"']+)["']>([\s\S]*?)<\/file>/gi;
+      let match;
+      while ((match = fileRegex.exec(raw)) !== null) {
+        files.push({
+          path: match[1],
+          content: match[2].trim() + '\n' // Ensure ending newline
+        });
+      }
+
+      if (files.length === 0) {
+         throw new Error(`Claude response did not contain any valid <file path="...">...</file> blocks.`);
+      }
+
+      console.log(`[coder] Successfully parsed ${files.length} file(s).`);
+      return { explanation, files };
 
     } catch (err) {
       console.warn(`[coder] Model "${model}" failed or returned an error: ${err.message}`);
