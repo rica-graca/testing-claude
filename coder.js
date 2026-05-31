@@ -232,28 +232,99 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 
 Provide your changes.`;
 
-  const msg = await anthropic.messages.create({
-    model: 'claude-3-5-sonnet-latest',
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }]
-  });
-
-  const raw = msg.content.map(b => b.text || '').join('');
-  
-  // Extract block cleanly starting with the first curly brace and ending with the last
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
-  }
-
-  const clean = jsonMatch[0].trim();
-
+  // 1. Live model discovery block
+  let discoveredModel = null;
   try {
-    return JSON.parse(clean);
-  } catch (e) {
-    throw new Error(`Failed parsing Claude JSON output: ${clean.slice(0, 200)}`);
+    console.log('[coder] Interrogating Anthropic API for active billing tier models...');
+    const modelsResponse = await anthropic.models.list({ limit: 100 });
+    const availableModels = modelsResponse.data.map(m => m.id);
+    
+    // Ordered preference list (including modern Claude 3.7 & 3.5 variants)
+    const preferences = [
+      process.env.CLAUDE_MODEL,
+      'claude-3-7-sonnet-latest',
+      'claude-3-7-sonnet-20250219',
+      'claude-3-5-sonnet-latest',
+      'claude-3-5-sonnet-20241022',
+      'claude-3-5-sonnet-20240620',
+      'claude-3-5-haiku-latest',
+      'claude-3-5-haiku-20241022',
+      'claude-3-haiku-20240307',
+      'claude-3-opus-latest',
+      'claude-3-opus-20240229'
+    ];
+
+    discoveredModel = preferences.find(p => p && availableModels.includes(p.trim()));
+    if (!discoveredModel) {
+      // Emergency fallback to any Claude-based model returned by the endpoint
+      discoveredModel = availableModels.find(id => id.startsWith('claude-'));
+    }
+    if (discoveredModel) {
+      console.log(`[coder] Auto-discovery successful! Selected active model: ${discoveredModel}`);
+    }
+  } catch (err) {
+    console.log(`[coder] Auto-discovery bypassed (${err.message}). Using manual configuration cascade.`);
   }
+
+  // 2. Build finalized model execution sequence
+  const executionCascade = [];
+  if (discoveredModel) {
+    executionCascade.push(discoveredModel);
+  }
+
+  // Inject default fallback items to try sequentially if the discovered choice experiences high latency or rate limits
+  const fallbackSequence = [
+    process.env.CLAUDE_MODEL,
+    'claude-3-7-sonnet-latest',
+    'claude-3-7-sonnet-20250219',
+    'claude-3-5-sonnet-latest',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-sonnet-20240620',
+    'claude-3-5-haiku-latest',
+    'claude-3-5-haiku-20241022',
+    'claude-3-haiku-20240307'
+  ];
+
+  for (const model of fallbackSequence) {
+    if (model && !executionCascade.includes(model)) {
+      executionCascade.push(model);
+    }
+  }
+
+  let lastError = null;
+
+  for (const model of executionCascade) {
+    try {
+      console.log(`[coder] Attempting code generation with model: ${model}...`);
+      
+      const msg = await anthropic.messages.create({
+        model: model,
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }]
+      });
+
+      const raw = msg.content.map(b => b.text || '').join('');
+      
+      // Clean parsing block
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
+      }
+
+      const clean = jsonMatch[0].trim();
+      const parsed = JSON.parse(clean);
+      
+      console.log(`[coder] Successfully generated implementation files!`);
+      return parsed;
+
+    } catch (err) {
+      console.warn(`[coder] Model "${model}" failed or returned an error: ${err.message}`);
+      lastError = err;
+    }
+  }
+
+  throw new Error(`All available models in our fallback cascade failed. Last logged error: ${lastError ? lastError.message : 'Unknown'}`);
 }
 
 function applyChanges(files) {
