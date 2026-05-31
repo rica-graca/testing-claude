@@ -1,0 +1,13 @@
+{
+  "name": "epic-refiner",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "CI agent that refines epics into GitHub kanban stories",
+  "scripts": {
+    "watch": "node refiner.js --watch",
+    "refine": "node refiner.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0"
+  }
+}
