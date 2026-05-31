@@ -52,7 +52,7 @@ try {
 
 async function runAgent() {
   console.log(`[coder] Starting development cycle for ${GITHUB_OWNER}/${GITHUB_REPO}...`);
-  console.log(`[coder] Operating Model: ${CLAUDE_MODEL}`);
+  console.log(`[coder] Primary Target Model: ${CLAUDE_MODEL}`);
 
   // Step 1: Find the next open User Story
   const issues = await fetchOpenUserStories();
@@ -79,7 +79,7 @@ async function runAgent() {
   const codebaseContext = getCodebaseContext();
 
   // Step 4: Ask Claude to implement the files
-  console.log(`[coder] Prompting Claude (${CLAUDE_MODEL}) to write code for ${storyId}...`);
+  console.log(`[coder] Prompting Claude to write code for ${storyId}...`);
   const implementation = await generateImplementation(activeStory, codebaseContext);
   console.log(`[coder] Claude completed generation! Explanation:\n${implementation.explanation}`);
 
@@ -242,28 +242,52 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 
 Provide your changes.`;
 
-  const msg = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }]
-  });
+  // Define a prioritized cascade of models to try in case of 404 errors
+  const modelCascade = [
+    CLAUDE_MODEL,
+    'claude-3-5-sonnet-20241022', // Sonnet v2
+    'claude-3-5-sonnet-20240620', // Sonnet v1
+    'claude-3-5-haiku-20241022',  // Haiku v2
+    'claude-3-haiku-20240307'     // Haiku v1
+  ];
 
-  const raw = msg.content.map(b => b.text || '').join('');
-  
-  // Extract block cleanly starting with the first curly brace and ending with the last
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
+  // Remove duplicates & ensure formatting is normalized
+  const uniqueModels = [...new Set(modelCascade.map(m => m ? m.trim() : '').filter(Boolean))];
+  let lastError = null;
+
+  for (const model of uniqueModels) {
+    try {
+      console.log(`[coder] Attempting generation with model: ${model}...`);
+      
+      const msg = await anthropic.messages.create({
+        model: model,
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }]
+      });
+
+      const raw = msg.content.map(b => b.text || '').join('');
+      
+      // Extract block cleanly starting with the first curly brace and ending with the last
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
+      }
+
+      const clean = jsonMatch[0].trim();
+      const parsed = JSON.parse(clean);
+      
+      console.log(`[coder] Successfully generated implementation using model: ${model}!`);
+      return parsed;
+
+    } catch (err) {
+      console.warn(`[coder] Warning: Model "${model}" failed or is unavailable in your API tier. (${err.message})`);
+      lastError = err;
+      // Continue to the next model in the list
+    }
   }
 
-  const clean = jsonMatch[0].trim();
-
-  try {
-    return JSON.parse(clean);
-  } catch (e) {
-    throw new Error(`Failed parsing Claude JSON output: ${clean.slice(0, 200)}`);
-  }
+  throw new Error(`All models in fallback cascade failed to execute. Last recorded error: ${lastError ? lastError.message : 'Unknown'}`);
 }
 
 function applyChanges(files) {
