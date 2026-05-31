@@ -143,6 +143,9 @@ async function processFile(filePath) {
   fs.writeFileSync(outPath, JSON.stringify(stories, null, 2));
   console.log(`[refiner] Wrote: ${path.basename(outPath)}`);
 
+  // Ensure the destination directory exists before moving the file safely
+  fs.mkdirSync(PROCESSED_DIR, { recursive: true });
+
   // Move to processed/
   const processedPath = path.join(PROCESSED_DIR, filename);
   fs.renameSync(filePath, processedPath);

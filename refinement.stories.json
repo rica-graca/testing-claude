@@ -1,0 +1,259 @@
+[
+  {
+    "id": "US-001",
+    "title": "Display reclamation suggestions when logging waste time",
+    "role": "user who logs wasted time",
+    "goal": "see alternative activities I could have done with that time",
+    "motivation": "reframe wasted time as opportunity cost to motivate better choices",
+    "acceptance_criteria": [
+      "Given a task with is_waste=true and duration_sec>0, when the task is stopped via POST /tasks/{id}/stop, then the response includes a reclamation_suggestions array",
+      "Given 45 minutes of wasted time, when suggestions are calculated, then at least 2 alternative activities are shown (e.g., '1 Spanish lesson', '3 km walk')",
+      "Given the suggestion calculation, when duration varies, then suggestions scale proportionally (e.g., 90 min = 2 Spanish lessons)",
+      "Given the API response in internal/handlers/handlers.go StopTask, when is_waste is true, then the response JSON includes reclamation_suggestions field",
+      "Given the frontend in web/static/js/app.js, when a waste task is stopped, then suggestions are displayed in the task card or a toast notification"
+    ],
+    "size": "M",
+    "dependencies": [],
+    "labels": [
+      "reclamation",
+      "backend",
+      "frontend"
+    ]
+  },
+  {
+    "id": "US-002",
+    "title": "Create configurable activity equivalents for reclamation suggestions",
+    "role": "product team",
+    "goal": "define a set of alternative activities with time-per-unit values",
+    "motivation": "enable accurate and varied reclamation suggestions",
+    "acceptance_criteria": [
+      "Given a new activities table in internal/db/db.go schema, when migrated, then columns include id, name, minutes_per_unit, unit_label (e.g., 'lesson', 'km')",
+      "Given seed data, when the app starts, then default activities exist: Spanish lesson (30 min), Walking (15 min/km), Reading (20 min/chapter), Meditation (10 min/session)",
+      "Given an activity repo in internal/db/, when activities are queried, then all configured activities are returned",
+      "Given the reclamation calculation, when duration_sec is provided, then each activity returns count = floor(duration_sec / (minutes_per_unit * 60))"
+    ],
+    "size": "S",
+    "dependencies": [],
+    "labels": [
+      "reclamation",
+      "backend",
+      "database"
+    ]
+  },
+  {
+    "id": "US-003",
+    "title": "Create time budget model and storage",
+    "role": "user who wants to limit guilty pleasures",
+    "goal": "define weekly time budgets for specific categories",
+    "motivation": "set boundaries on time-wasting activities",
+    "acceptance_criteria": [
+      "Given a new budgets table in internal/db/db.go schema, when migrated, then columns include id, category_id (FK to categories), weekly_limit_sec, created_at, updated_at",
+      "Given internal/db/budgets.go, when a budget repo is created, then it supports Create, Get, Update, Delete, and ListAll operations",
+      "Given internal/models/models.go, when Budget model is added, then it includes ID, CategoryID, WeeklyLimitSec, CreatedAt fields",
+      "Given a category with a budget, when the budget is deleted, then the category remains unaffected"
+    ],
+    "size": "S",
+    "dependencies": [],
+    "labels": [
+      "budgets",
+      "backend",
+      "database"
+    ]
+  },
+  {
+    "id": "US-004",
+    "title": "Expose budget CRUD API endpoints",
+    "role": "frontend application",
+    "goal": "create, read, update, and delete time budgets via REST",
+    "motivation": "allow users to manage their guilty pleasure limits",
+    "acceptance_criteria": [
+      "Given internal/handlers/handlers.go, when GET /api/budgets is called, then all budgets are returned with category details",
+      "Given POST /api/budgets with {category_id, weekly_limit_sec}, when valid, then a new budget is created and returned",
+      "Given PATCH /api/budgets/{id} with {weekly_limit_sec}, when valid, then the budget is updated",
+      "Given DELETE /api/budgets/{id}, when called, then the budget is removed and 204 is returned",
+      "Given a duplicate budget for the same category_id, when POST is attempted, then 409 Conflict is returned"
+    ],
+    "size": "S",
+    "dependencies": [
+      "US-003"
+    ],
+    "labels": [
+      "budgets",
+      "backend",
+      "api"
+    ]
+  },
+  {
+    "id": "US-005",
+    "title": "Calculate current week budget consumption",
+    "role": "user tracking their guilty pleasure budget",
+    "goal": "see how much of my weekly budget I have used",
+    "motivation": "know when I'm approaching or exceeding my limits",
+    "acceptance_criteria": [
+      "Given internal/db/budgets.go, when GetBudgetStatus(categoryID) is called, then it returns {budget, used_sec, remaining_sec, percentage_used}",
+      "Given the current ISO week, when used_sec is calculated, then it sums duration_sec from tasks where category_id matches and started_at is within the current week",
+      "Given internal/db/tasks.go List function, when filtering by week, then the from/to parameters correctly bound Monday 00:00 to Sunday 23:59",
+      "Given a category with no tasks this week, when status is queried, then used_sec is 0 and remaining_sec equals weekly_limit_sec"
+    ],
+    "size": "M",
+    "dependencies": [
+      "US-003"
+    ],
+    "labels": [
+      "budgets",
+      "backend"
+    ]
+  },
+  {
+    "id": "US-006",
+    "title": "Add budget status to API response",
+    "role": "frontend application",
+    "goal": "receive budget consumption data when fetching budgets",
+    "motivation": "display progress bars and warnings to users",
+    "acceptance_criteria": [
+      "Given GET /api/budgets, when budgets are returned, then each budget includes used_sec, remaining_sec, and percentage_used for the current week",
+      "Given GET /api/budgets/{id}, when a single budget is fetched, then it includes the same consumption fields",
+      "Given internal/models/models.go, when BudgetStatus struct is added, then it embeds Budget plus UsedSec, RemainingSec, PercentageUsed"
+    ],
+    "size": "S",
+    "dependencies": [
+      "US-004",
+      "US-005"
+    ],
+    "labels": [
+      "budgets",
+      "backend",
+      "api"
+    ]
+  },
+  {
+    "id": "US-007",
+    "title": "Warn user when approaching budget limit",
+    "role": "user logging time in a budgeted category",
+    "goal": "receive a warning when I'm near or over my weekly limit",
+    "motivation": "prevent accidentally exceeding my guilty pleasure budget",
+    "acceptance_criteria": [
+      "Given a task is stopped via POST /tasks/{id}/stop, when the task's category has a budget, then the response includes budget_warning if percentage_used >= 80%",
+      "Given percentage_used >= 80% and < 100%, when warning is returned, then message says 'Approaching limit: X% used'",
+      "Given percentage_used >= 100%, when warning is returned, then message says 'Budget exceeded: X% used'",
+      "Given a task in a category without a budget, when stopped, then no budget_warning field is included"
+    ],
+    "size": "S",
+    "dependencies": [
+      "US-005"
+    ],
+    "labels": [
+      "budgets",
+      "backend",
+      "notifications"
+    ]
+  },
+  {
+    "id": "US-008",
+    "title": "Display budget management UI",
+    "role": "user managing time budgets",
+    "goal": "create and edit weekly budgets for categories in the dashboard",
+    "motivation": "easily configure my guilty pleasure limits",
+    "acceptance_criteria": [
+      "Given web/static/js/app.js, when a 'Budgets' section is added to the categories view, then users can see existing budgets with progress bars",
+      "Given a category without a budget, when 'Set Budget' is clicked, then a form appears to enter weekly_limit in hours/minutes",
+      "Given an existing budget, when 'Edit' is clicked, then the form is pre-filled with current limit",
+      "Given a budget is saved, when the API returns success, then the UI updates without page reload"
+    ],
+    "size": "M",
+    "dependencies": [
+      "US-004",
+      "US-006"
+    ],
+    "labels": [
+      "budgets",
+      "frontend"
+    ]
+  },
+  {
+    "id": "US-009",
+    "title": "Display budget warnings in task UI",
+    "role": "user stopping a task",
+    "goal": "see budget warnings prominently after stopping a tracked task",
+    "motivation": "immediately know if I'm overusing a budgeted category",
+    "acceptance_criteria": [
+      "Given web/static/js/app.js, when a task is stopped and response includes budget_warning, then a toast or alert displays the warning message",
+      "Given percentage_used >= 100%, when warning is displayed, then it uses a red/danger color scheme",
+      "Given percentage_used >= 80% and < 100%, when warning is displayed, then it uses a yellow/warning color scheme",
+      "Given no budget_warning in response, when task is stopped, then no warning UI appears"
+    ],
+    "size": "S",
+    "dependencies": [
+      "US-007",
+      "US-008"
+    ],
+    "labels": [
+      "budgets",
+      "frontend",
+      "notifications"
+    ]
+  },
+  {
+    "id": "US-010",
+    "title": "Display reclamation suggestions in task completion UI",
+    "role": "user who just logged wasted time",
+    "goal": "see what I could have done with the wasted time in the UI",
+    "motivation": "feel motivated to make better choices next time",
+    "acceptance_criteria": [
+      "Given web/static/js/app.js, when a waste task is stopped and response includes reclamation_suggestions, then suggestions are displayed below the task card or in a modal",
+      "Given multiple suggestions, when displayed, then each shows the activity name and achievable count (e.g., '1 Spanish lesson, 3 km walk')",
+      "Given no suggestions (duration too short), when displayed, then a message says 'Even small moments matter!'",
+      "Given a non-waste task is stopped, when response has no reclamation_suggestions, then no suggestions UI appears"
+    ],
+    "size": "S",
+    "dependencies": [
+      "US-001"
+    ],
+    "labels": [
+      "reclamation",
+      "frontend"
+    ]
+  },
+  {
+    "id": "US-011",
+    "title": "Allow users to customize reclamation activities",
+    "role": "user with personal goals",
+    "goal": "add my own activities and time estimates for reclamation suggestions",
+    "motivation": "see suggestions relevant to my personal improvement goals",
+    "acceptance_criteria": [
+      "Given GET /api/activities, when called, then all activities (default and custom) are returned",
+      "Given POST /api/activities with {name, minutes_per_unit, unit_label}, when valid, then a custom activity is created",
+      "Given DELETE /api/activities/{id}, when called on a custom activity, then it is removed",
+      "Given a default activity, when DELETE is attempted, then 403 Forbidden is returned",
+      "Given web/static/js/app.js, when an 'Activities' management section exists, then users can add/remove custom activities"
+    ],
+    "size": "M",
+    "dependencies": [
+      "US-002"
+    ],
+    "labels": [
+      "reclamation",
+      "backend",
+      "frontend"
+    ]
+  },
+  {
+    "id": "US-012",
+    "title": "SPIKE: Research optimal default activities and time estimates",
+    "role": "product team",
+    "goal": "determine which default activities resonate with users",
+    "motivation": "ensure reclamation suggestions feel achievable and motivating",
+    "acceptance_criteria": [
+      "Research: What are the top 5-10 self-improvement activities users commonly track?",
+      "Research: What are realistic time estimates for one unit of each activity (e.g., Duolingo lesson = 15 min)?",
+      "Research: Should activities be categorized (fitness, learning, wellness)?",
+      "Deliverable: Document with recommended default activities and rationale"
+    ],
+    "size": "SPIKE",
+    "dependencies": [],
+    "labels": [
+      "reclamation",
+      "research"
+    ]
+  }
+]
