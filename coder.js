@@ -242,13 +242,18 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 
 Provide your changes.`;
 
-  // Define a prioritized cascade of models to try in case of 404 errors
+  // Define a comprehensive prioritized cascade of model variations
   const modelCascade = [
     CLAUDE_MODEL,
+    'claude-3-5-sonnet-latest',   // Dynamic Sonnet
     'claude-3-5-sonnet-20241022', // Sonnet v2
     'claude-3-5-sonnet-20240620', // Sonnet v1
+    'claude-3-5-haiku-latest',    // Dynamic Haiku v2
     'claude-3-5-haiku-20241022',  // Haiku v2
-    'claude-3-haiku-20240307'     // Haiku v1
+    'claude-3-haiku-20240307',    // Haiku v1
+    'claude-3-opus-latest',       // Dynamic Opus
+    'claude-3-opus-20240229',     // Opus v1
+    'claude-3-sonnet-20240229'    // Legacy Sonnet v1
   ];
 
   // Remove duplicates & ensure formatting is normalized
@@ -286,6 +291,16 @@ Provide your changes.`;
       // Continue to the next model in the list
     }
   }
+
+  // If everything failed, print a detailed environments diagnostics payload to aid local debugging
+  console.error('\n' + '='.repeat(60));
+  console.error('[coder] DIAGNOSTICS: ALL ANTHROPIC MODELS FAILED!');
+  console.error('This generally indicates an endpoint mapping issue or workspace-level model blocks.');
+  console.error(`- ANTHROPIC_BASE_URL: ${process.env.ANTHROPIC_BASE_URL || 'Not Set (Direct API)'}`);
+  console.error(`- HTTP_PROXY: ${process.env.HTTP_PROXY || 'Not Set'}`);
+  console.error(`- HTTPS_PROXY: ${process.env.HTTPS_PROXY || 'Not Set'}`);
+  console.error(`- Node version: ${process.version}`);
+  console.error('='.repeat(60) + '\n');
 
   throw new Error(`All models in fallback cascade failed to execute. Last recorded error: ${lastError ? lastError.message : 'Unknown'}`);
 }
