@@ -15,23 +15,20 @@ import Anthropic from '@anthropic-ai/sdk';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Config (from env) ────────────────────────────────────────────────────────
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'mock';
 const GITHUB_TOKEN      = process.env.GITHUB_TOKEN;
 const GITHUB_OWNER      = process.env.GITHUB_OWNER || process.env.GITHUB_REPOSITORY_OWNER;
 const GITHUB_REPO       = process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY?.split('/')[1];
+
+const MOCK_MODE = process.env.MOCK_CLAUDE === 'true' || ANTHROPIC_API_KEY === 'mock';
 
 if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
   console.error('[coder] Error: Missing required GitHub environment variables.');
   process.exit(1);
 }
 
-if (!ANTHROPIC_API_KEY) {
-  console.error('[coder] Error: Missing ANTHROPIC_API_KEY environment variable.');
-  process.exit(1);
-}
-
-// Initialize Anthropic Client
-const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+// Initialize Anthropic Client (only if not mocking fully without a key)
+const anthropic = ANTHROPIC_API_KEY !== 'mock' ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 
 // ─── Run Developer Agent ──────────────────────────────────────────────────────
 try {
@@ -43,6 +40,7 @@ try {
 
 async function runAgent() {
   console.log(`[coder] Starting development cycle for ${GITHUB_OWNER}/${GITHUB_REPO}...`);
+  if (MOCK_MODE) console.log(`[coder] 🟡 MOCK MODE ACTIVE: Bypassing Claude API.`);
 
   // Step 1: Find the next open User Story
   const issues = await fetchOpenUserStories();
@@ -68,10 +66,10 @@ async function runAgent() {
   console.log('[coder] Gathering codebase context...');
   const codebaseContext = getCodebaseContext();
 
-  // Step 4: Ask Claude to implement the files
-  console.log(`[coder] Prompting Claude to write code for ${storyId}...`);
+  // Step 4: Ask Claude (or Mock) to implement the files
+  console.log(`[coder] Prompting Claude (or mock) to write code for ${storyId}...`);
   const implementation = await generateImplementation(activeStory, codebaseContext);
-  console.log(`[coder] Claude completed generation! Explanation:\n${implementation.explanation}`);
+  console.log(`[coder] Code generation completed! Explanation:\n${implementation.explanation}`);
 
   // Step 5: Apply Code Changes Locally
   console.log('[coder] Applying code modifications to workspace...');
@@ -137,7 +135,7 @@ This is an automated Pull Request implementing **${storyId}**:
 ${explanation}
 
 ---
-*Created by Epic Refiner Coder agent using Claude.*`;
+*Created by Epic Refiner Coder agent.*`;
 
   const res = await ghRest('POST', `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/pulls`, {
     title: `[${storyId}] ${title}`,
@@ -202,8 +200,24 @@ function getCodebaseContext() {
   return snippets.join('\n\n');
 }
 
-// ─── Claude Structured Code Generation ───────────────────────────────────────
+// ─── Code Generation (Claude or Mock) ────────────────────────────────────────
 async function generateImplementation(story, codebaseContext) {
+  if (MOCK_MODE) {
+    console.log('[coder] Bypassing Claude API -> generating mock implementation...');
+    // A small delay to simulate generation time
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    return {
+      explanation: `(MOCK) Automatically implemented ${story.id} to test the PR pipeline. Added UI scaffolding and backend hooks.`,
+      files: [
+        {
+          path: `web/mock_${story.id.toLowerCase()}.js`,
+          content: `// Mock implementation file for ${story.id}\n// Title: ${story.title}\n\nexport function initMock() {\n  console.log('Mock loaded!');\n}\n`
+        }
+      ]
+    };
+  }
+
   const systemPrompt = `You are an automated elite software engineer. 
 Your objective is to read the target User Story, analyze the existing codebase context, and write the necessary additions or revisions to satisfy all acceptance criteria.
 
@@ -232,68 +246,20 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 
 Provide your changes.`;
 
-  // 1. Live model discovery block
-  let discoveredModel = null;
-  try {
-    console.log('[coder] Interrogating Anthropic API for active billing tier models...');
-    const modelsResponse = await anthropic.models.list({ limit: 100 });
-    const availableModels = modelsResponse.data.map(m => m.id);
-    
-    // Ordered preference list (including modern Claude 3.7 & 3.5 variants)
-    const preferences = [
-      process.env.CLAUDE_MODEL,
-      'claude-3-7-sonnet-latest',
-      'claude-3-7-sonnet-20250219',
-      'claude-3-5-sonnet-latest',
-      'claude-3-5-sonnet-20241022',
-      'claude-3-5-sonnet-20240620',
-      'claude-3-5-haiku-latest',
-      'claude-3-5-haiku-20241022',
-      'claude-3-haiku-20240307',
-      'claude-3-opus-latest',
-      'claude-3-opus-20240229'
-    ];
-
-    discoveredModel = preferences.find(p => p && availableModels.includes(p.trim()));
-    if (!discoveredModel) {
-      // Emergency fallback to any Claude-based model returned by the endpoint
-      discoveredModel = availableModels.find(id => id.startsWith('claude-'));
-    }
-    if (discoveredModel) {
-      console.log(`[coder] Auto-discovery successful! Selected active model: ${discoveredModel}`);
-    }
-  } catch (err) {
-    console.log(`[coder] Auto-discovery bypassed (${err.message}). Using manual configuration cascade.`);
-  }
-
-  // 2. Build finalized model execution sequence
-  const executionCascade = [];
-  if (discoveredModel) {
-    executionCascade.push(discoveredModel);
-  }
-
-  // Inject default fallback items to try sequentially if the discovered choice experiences high latency or rate limits
   const fallbackSequence = [
     process.env.CLAUDE_MODEL,
+    'claude-opus-4-5', // <--- Mapped directly from your working refiner.js script
     'claude-3-7-sonnet-latest',
-    'claude-3-7-sonnet-20250219',
     'claude-3-5-sonnet-latest',
     'claude-3-5-sonnet-20241022',
     'claude-3-5-sonnet-20240620',
     'claude-3-5-haiku-latest',
-    'claude-3-5-haiku-20241022',
     'claude-3-haiku-20240307'
-  ];
-
-  for (const model of fallbackSequence) {
-    if (model && !executionCascade.includes(model)) {
-      executionCascade.push(model);
-    }
-  }
+  ].filter(Boolean); // Remove undefined/null
 
   let lastError = null;
 
-  for (const model of executionCascade) {
+  for (const model of fallbackSequence) {
     try {
       console.log(`[coder] Attempting code generation with model: ${model}...`);
       
@@ -306,17 +272,11 @@ Provide your changes.`;
 
       const raw = msg.content.map(b => b.text || '').join('');
       
-      // Clean parsing block
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
-      }
+      if (!jsonMatch) throw new Error(`Claude response did not contain a valid JSON object block.`);
 
       const clean = jsonMatch[0].trim();
-      const parsed = JSON.parse(clean);
-      
-      console.log(`[coder] Successfully generated implementation files!`);
-      return parsed;
+      return JSON.parse(clean);
 
     } catch (err) {
       console.warn(`[coder] Model "${model}" failed or returned an error: ${err.message}`);
