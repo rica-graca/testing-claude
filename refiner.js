@@ -400,7 +400,19 @@ function parseFrontMatter(content) {
   const meta = {};
   for (const line of fmMatch[1].split('\n')) {
     const [key, ...rest] = line.split(':');
-    if (key && rest.length) meta[key.trim()] = rest.join(':').trim();
+    if (key && rest.length) {
+      const cleanedKey = key.trim();
+      const cleanedValue = rest.join(':').trim();
+
+      // Automatically convert comma-separated fields into clean arrays
+      if (cleanedKey === 'labels' || cleanedKey === 'dependencies') {
+        meta[cleanedKey] = cleanedValue
+          ? cleanedValue.split(',').map(item => item.trim()).filter(Boolean)
+          : [];
+      } else {
+        meta[cleanedKey] = cleanedValue;
+      }
+    }
   }
   return { meta, body: fmMatch[2].trim() };
 }
