@@ -2,7 +2,7 @@
 /**
  * coder.js
  * Automated developer agent that implements user stories sequentially.
- * Finds the next open issue, reads codebase context, uses Gemini to write implementation files,
+ * Finds the next open issue, reads codebase context, uses Claude to write implementation files,
  * pushes to a branch, and opens a Pull Request.
  */
 
@@ -10,19 +10,28 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Config (from env) ────────────────────────────────────────────────────────
-const apiKey = ""; // Injected automatically at runtime by the execution environment
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_OWNER = process.env.GITHUB_OWNER || process.env.GITHUB_REPOSITORY_OWNER;
-const GITHUB_REPO  = process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY?.split('/')[1];
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GITHUB_TOKEN      = process.env.GITHUB_TOKEN;
+const GITHUB_OWNER      = process.env.GITHUB_OWNER || process.env.GITHUB_REPOSITORY_OWNER;
+const GITHUB_REPO       = process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY?.split('/')[1];
 
 if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
   console.error('[coder] Error: Missing required GitHub environment variables.');
   process.exit(1);
 }
+
+if (!ANTHROPIC_API_KEY) {
+  console.error('[coder] Error: Missing ANTHROPIC_API_KEY environment variable.');
+  process.exit(1);
+}
+
+// Initialize Anthropic Client
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 // ─── Run Developer Agent ──────────────────────────────────────────────────────
 try {
@@ -59,10 +68,10 @@ async function runAgent() {
   console.log('[coder] Gathering codebase context...');
   const codebaseContext = getCodebaseContext();
 
-  // Step 4: Ask Gemini to implement the files
-  console.log(`[coder] Prompting Gemini to write code for ${storyId}...`);
+  // Step 4: Ask Claude to implement the files
+  console.log(`[coder] Prompting Claude to write code for ${storyId}...`);
   const implementation = await generateImplementation(activeStory, codebaseContext);
-  console.log(`[coder] Gemini completed generation! Explanation:\n${implementation.explanation}`);
+  console.log(`[coder] Claude completed generation! Explanation:\n${implementation.explanation}`);
 
   // Step 5: Apply Code Changes Locally
   console.log('[coder] Applying code modifications to workspace...');
@@ -128,7 +137,7 @@ This is an automated Pull Request implementing **${storyId}**:
 ${explanation}
 
 ---
-*Created by Epic Refiner Coder agent.*`;
+*Created by Epic Refiner Coder agent using Claude.*`;
 
   const res = await ghRest('POST', `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/pulls`, {
     title: `[${storyId}] ${title}`,
@@ -193,13 +202,25 @@ function getCodebaseContext() {
   return snippets.join('\n\n');
 }
 
-// ─── Gemini Structured Code Generation ───────────────────────────────────────
+// ─── Claude Structured Code Generation ───────────────────────────────────────
 async function generateImplementation(story, codebaseContext) {
   const systemPrompt = `You are an automated elite software engineer. 
 Your objective is to read the target User Story, analyze the existing codebase context, and write the necessary additions or revisions to satisfy all acceptance criteria.
 
 Maintain architectural consistency, ensure variables match, and write clean, idiomatic code (.go or .js).
-Return a JSON object containing your architecture explanation and an array of files that should be written or modified.`;
+
+You MUST respond with a valid JSON object matching the schema below. Do NOT wrap it in any conversational introduction/outro prose. Respond ONLY with the raw JSON.
+
+Output JSON Schema:
+{
+  "explanation": "A summary of what changes were implemented and how the architectural requirements were handled.",
+  "files": [
+    {
+      "path": "The relative path of the file to create/overwrite from project root (e.g. 'internal/reclamation/reclamation.go').",
+      "content": "The complete, clean new content of the file."
+    }
+  ]
+}`;
 
   const userPrompt = `### User Story to Implement
 Title: [${story.id}] ${story.title}
@@ -211,79 +232,27 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 
 Provide your changes.`;
 
-  // Define Structured JSON schema output to guarantee robust formats
-  const responseSchema = {
-    type: "OBJECT",
-    properties: {
-      explanation: {
-        type: "STRING",
-        description: "A summary of what changes were implemented and how the architectural requirements were handled."
-      },
-      files: {
-        type: "ARRAY",
-        description: "List of files to modify or create.",
-        items: {
-          type: "OBJECT",
-          properties: {
-            path: {
-              type: "STRING",
-              description: "The relative path of the file to create/overwrite from project root (e.g. 'internal/reclamation/reclamation.go')."
-            },
-            content: {
-              type: "STRING",
-              description: "The complete new content of the file."
-            }
-          },
-          required: ["path", "content"]
-        }
-      }
-    },
-    required: ["explanation", "files"]
-  };
-
-  const payload = {
-    contents: [{
-      parts: [{ text: userPrompt }]
-    }],
-    systemInstruction: {
-      parts: [{ text: systemPrompt }]
-    },
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: responseSchema
-    }
-  };
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-  
-  const res = await fetchWithBackoff(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+  const msg = await anthropic.messages.create({
+    model: 'claude-3-5-sonnet-latest',
+    max_tokens: 8192,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }]
   });
 
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const raw = msg.content.map(b => b.text || '').join('');
   
-  if (!text) {
-    throw new Error(`Gemini returned empty candidate options. Raw response: ${JSON.stringify(data)}`);
+  // Extract block cleanly starting with the first curly brace and ending with the last
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
   }
 
-  return JSON.parse(text);
-}
+  const clean = jsonMatch[0].trim();
 
-async function fetchWithBackoff(url, options, retries = 5, delay = 1000) {
   try {
-    const res = await fetch(url, options);
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}: ${body}`);
-    }
-    return res;
-  } catch (err) {
-    if (retries <= 1) throw err;
-    await new Promise(r => setTimeout(r, delay));
-    return fetchWithBackoff(url, options, retries - 1, delay * 2);
+    return JSON.parse(clean);
+  } catch (e) {
+    throw new Error(`Failed parsing Claude JSON output: ${clean.slice(0, 200)}`);
   }
 }
 
