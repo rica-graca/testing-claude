@@ -28,13 +28,27 @@ func (t *Task) IsRunning() bool {
 	return t.StartedAt != nil && t.EndedAt == nil
 }
 
+// ReclamationSuggestion represents an alternative activity suggestion
+type ReclamationSuggestion struct {
+	Activity string  `json:"activity"`
+	Count    float64 `json:"count"`
+	Unit     string  `json:"unit"`
+	Message  string  `json:"message"`
+}
+
+// StopTaskResponse is returned when stopping a task
+type StopTaskResponse struct {
+	Task                    *Task                   `json:"task"`
+	ReclamationSuggestions  []ReclamationSuggestion `json:"reclamation_suggestions,omitempty"`
+}
+
 // WasteReport aggregates wasted time per category.
 type WasteReport struct {
-	Period      string            `json:"period"` // e.g. "2024-05-01"
-	TotalSec    int               `json:"total_sec"`
-	WasteSec    int               `json:"waste_sec"`
-	WastePct    float64           `json:"waste_pct"`
-	ByCategory  []CategoryReport  `json:"by_category"`
+	Period     string           `json:"period"` // e.g. "2024-05-01"
+	TotalSec   int              `json:"total_sec"`
+	WasteSec   int              `json:"waste_sec"`
+	WastePct   float64          `json:"waste_pct"`
+	ByCategory []CategoryReport `json:"by_category"`
 }
 
 type CategoryReport struct {

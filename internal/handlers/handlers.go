@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yourname/timewaste/internal/db"
 	"github.com/yourname/timewaste/internal/models"
+	"github.com/yourname/timewaste/internal/reclamation"
 )
 
 type Handler struct {
@@ -170,7 +171,27 @@ func (h *Handler) StopTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, task)
+
+	// Build response with reclamation suggestions if this is a waste task
+	response := models.StopTaskResponse{
+		Task: task,
+	}
+
+	// If task is marked as waste and has duration, calculate suggestions
+	if task.IsWaste && task.DurationSec != nil && *task.DurationSec > 0 {
+		suggestions := reclamation.Calculate(*task.DurationSec)
+		response.ReclamationSuggestions = make([]models.ReclamationSuggestion, len(suggestions))
+		for i, s := range suggestions {
+			response.ReclamationSuggestions[i] = models.ReclamationSuggestion{
+				Activity: s.Activity,
+				Count:    s.Count,
+				Unit:     s.Unit,
+				Message:  s.Message,
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 // ── Categories ─────────────────────────────────────────────────────────────
@@ -214,25 +235,26 @@ func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ── Report ─────────────────────────────────────────────────────────────────
+// ── Reports ────────────────────────────────────────────────────────────────
 
 func (h *Handler) GetReport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	from := time.Now().AddDate(0, 0, -7) // default: last 7 days
-	to := time.Now()
+	var from, to *time.Time
 
 	if v := q.Get("from"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			from = t
+		t, err := time.Parse("2006-01-02", v)
+		if err == nil {
+			from = &t
 		}
 	}
 	if v := q.Get("to"); v != "" {
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			to = t.Add(24*time.Hour - time.Second)
+		t, err := time.Parse("2006-01-02", v)
+		if err == nil {
+			to = &t
 		}
 	}
 
-	report, err := h.tasks.WasteReport(r.Context(), from, to)
+	report, err := h.tasks.Report(r.Context(), from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -242,12 +264,14 @@ func (h *Handler) GetReport(w http.ResponseWriter, r *http.Request) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	json.NewEncoder(w).Encode(data)
 }
 
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
