@@ -1,70 +1,70 @@
-name: Epic Refiner
+# name: Epic Refiner
 
-on:
-  push:
-    paths:
-      - 'refinements/*.md'
-      - 'refinements/*.txt'
-      - 'refinements/*.epic'
-  workflow_dispatch:
-    inputs:
-      file:
-        description: 'Specific refinement file to process (e.g. refinements/auth.md)'
-        required: false
+# on:
+#   push:
+#     paths:
+#       - 'refinements/*.md'
+#       - 'refinements/*.txt'
+#       - 'refinements/*.epic'
+#   workflow_dispatch:
+#     inputs:
+#       file:
+#         description: 'Specific refinement file to process (e.g. refinements/auth.md)'
+#         required: false
 
-jobs:
-  refine:
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write        # create issues
-      contents: write      # move files to processed/
-      repository-projects: write  # add to project board (classic projects)
+# jobs:
+#   refine:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       issues: write        # create issues
+#       contents: write      # move files to processed/
+#       repository-projects: write  # add to project board (classic projects)
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2   # need previous commit to detect new files
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 2   # need previous commit to detect new files
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: '20'
 
-      - name: Install dependencies
-        run: npm ci
+#       - name: Install dependencies
+#         run: npm ci
 
-      - name: Find new refinement files
-        id: find-files
-        run: |
-          if [ -n "${{ github.event.inputs.file }}" ]; then
-            echo "files=${{ github.event.inputs.file }}" >> $GITHUB_OUTPUT
-          else
-            # Files added in this push
-            NEW=$(git diff --name-only --diff-filter=A HEAD~1 HEAD -- 'refinements/*.md' 'refinements/*.txt' 'refinements/*.epic' | tr '\n' ' ')
-            echo "files=$NEW" >> $GITHUB_OUTPUT
-            echo "New files: $NEW"
-          fi
+#       - name: Find new refinement files
+#         id: find-files
+#         run: |
+#           if [ -n "${{ github.event.inputs.file }}" ]; then
+#             echo "files=${{ github.event.inputs.file }}" >> $GITHUB_OUTPUT
+#           else
+#             # Files added in this push
+#             NEW=$(git diff --name-only --diff-filter=A HEAD~1 HEAD -- 'refinements/*.md' 'refinements/*.txt' 'refinements/*.epic' | tr '\n' ' ')
+#             echo "files=$NEW" >> $GITHUB_OUTPUT
+#             echo "New files: $NEW"
+#           fi
 
-      - name: Run Epic Refiner
-        if: steps.find-files.outputs.files != ''
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO: ${{ github.event.repository.name }}
-          GITHUB_PROJECT_NUMBER: ${{ vars.GITHUB_PROJECT_NUMBER }}
-          DEFAULT_STATUS: 'Todo'
-          PROCESSED_DIR: refinements/processed
-        run: |
-          for FILE in ${{ steps.find-files.outputs.files }}; do
-            echo "Processing $FILE..."
-            node refiner.js "$FILE"
-          done
+#       - name: Run Epic Refiner
+#         if: steps.find-files.outputs.files != ''
+#         env:
+#           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#           GITHUB_OWNER: ${{ github.repository_owner }}
+#           GITHUB_REPO: ${{ github.event.repository.name }}
+#           GITHUB_PROJECT_NUMBER: ${{ vars.GITHUB_PROJECT_NUMBER }}
+#           DEFAULT_STATUS: 'Todo'
+#           PROCESSED_DIR: refinements/processed
+#         run: |
+#           for FILE in ${{ steps.find-files.outputs.files }}; do
+#             echo "Processing $FILE..."
+#             node refiner.js "$FILE"
+#           done
 
-      - name: Commit processed files
-        if: steps.find-files.outputs.files != ''
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add refinements/processed/ '*.stories.json' || true
-          git diff --staged --quiet || git commit -m "ci: processed refinement files [skip ci]"
-          git push
+#       - name: Commit processed files
+#         if: steps.find-files.outputs.files != ''
+#         run: |
+#           git config user.name  "github-actions[bot]"
+#           git config user.email "github-actions[bot]@users.noreply.github.com"
+#           git add refinements/processed/ '*.stories.json' || true
+#           git diff --staged --quiet || git commit -m "ci: processed refinement files [skip ci]"
+#           git push
