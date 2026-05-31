@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>timewaste — know where your day goes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-icon">⏱</span>
+        <span class="brand-name">timewaste</span>
+      </div>
+      <nav>
+        <a href="#" class="nav-item active" data-view="dashboard">Dashboard</a>
+        <a href="#" class="nav-item" data-view="tasks">Tasks</a>
+        <a href="#" class="nav-item" data-view="report">Waste Report</a>
+        <a href="#" class="nav-item" data-view="categories">Categories</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="live-clock" id="live-clock"></div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <!-- Dashboard View -->
+      <section id="view-dashboard" class="view active">
+        <div class="page-header">
+          <h1>Today's Overview</h1>
+          <button class="btn btn-primary" id="new-task-btn">+ New Task</button>
+        </div>
+
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Time tracked</div>
+            <div class="stat-value" id="stat-total">—</div>
+          </div>
+          <div class="stat-card waste">
+            <div class="stat-label">Wasted</div>
+            <div class="stat-value" id="stat-waste">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Waste %</div>
+            <div class="stat-value" id="stat-pct">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active task</div>
+            <div class="stat-value" id="stat-active">None</div>
+          </div>
+        </div>
+
+        <div class="waste-bar-wrap">
+          <div class="waste-bar" id="waste-bar" style="width:0%"></div>
+        </div>
+
+        <h2 class="section-title">Running now</h2>
+        <div id="running-tasks" class="task-list"></div>
+
+        <h2 class="section-title">Recent tasks</h2>
+        <div id="recent-tasks" class="task-list"></div>
+      </section>
+
+      <!-- Tasks View -->
+      <section id="view-tasks" class="view">
+        <div class="page-header">
+          <h1>All Tasks</h1>
+          <div class="filters">
+            <select id="filter-category" class="select-input">
+              <option value="">All categories</option>
+            </select>
+            <select id="filter-waste" class="select-input">
+              <option value="">All</option>
+              <option value="true">Waste only</option>
+              <option value="false">Productive only</option>
+            </select>
+          </div>
+        </div>
+        <div id="all-tasks" class="task-list"></div>
+      </section>
+
+      <!-- Report View -->
+      <section id="view-report" class="view">
+        <div class="page-header">
+          <h1>Waste Report</h1>
+          <div class="filters">
+            <input type="date" id="report-from" class="select-input" />
+            <input type="date" id="report-to" class="select-input" />
+            <button class="btn btn-secondary" id="load-report-btn">Load</button>
+          </div>
+        </div>
+        <div id="report-content"></div>
+      </section>
+
+      <!-- Categories View -->
+      <section id="view-categories" class="view">
+        <div class="page-header">
+          <h1>Categories</h1>
+          <button class="btn btn-primary" id="new-category-btn">+ New Category</button>
+        </div>
+        <div id="categories-list" class="categories-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-title">New Task</h2>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
