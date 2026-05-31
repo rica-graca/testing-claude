@@ -20,6 +20,15 @@ const GITHUB_TOKEN      = process.env.GITHUB_TOKEN;
 const GITHUB_OWNER      = process.env.GITHUB_OWNER || process.env.GITHUB_REPOSITORY_OWNER;
 const GITHUB_REPO       = process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY?.split('/')[1];
 
+// Configurable model name defaulting to the widely accessible Claude 3.5 Sonnet v1
+let CLAUDE_MODEL      = process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20240620';
+
+// Self-correction for common configuration typos (e.g., duplicate "claude" prefixes)
+if (CLAUDE_MODEL.startsWith('claudeclaude-')) {
+  console.log(`[coder] Normalizing misconfigured model name: "${CLAUDE_MODEL}" -> "${CLAUDE_MODEL.replace(/^claudeclaude-/, 'claude-')}"`);
+  CLAUDE_MODEL = CLAUDE_MODEL.replace(/^claudeclaude-/, 'claude-');
+}
+
 if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
   console.error('[coder] Error: Missing required GitHub environment variables.');
   process.exit(1);
@@ -43,6 +52,7 @@ try {
 
 async function runAgent() {
   console.log(`[coder] Starting development cycle for ${GITHUB_OWNER}/${GITHUB_REPO}...`);
+  console.log(`[coder] Operating Model: ${CLAUDE_MODEL}`);
 
   // Step 1: Find the next open User Story
   const issues = await fetchOpenUserStories();
@@ -69,7 +79,7 @@ async function runAgent() {
   const codebaseContext = getCodebaseContext();
 
   // Step 4: Ask Claude to implement the files
-  console.log(`[coder] Prompting Claude to write code for ${storyId}...`);
+  console.log(`[coder] Prompting Claude (${CLAUDE_MODEL}) to write code for ${storyId}...`);
   const implementation = await generateImplementation(activeStory, codebaseContext);
   console.log(`[coder] Claude completed generation! Explanation:\n${implementation.explanation}`);
 
@@ -233,7 +243,7 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 Provide your changes.`;
 
   const msg = await anthropic.messages.create({
-    model: 'claudeclaude-3-5-sonnet-latest',
+    model: CLAUDE_MODEL,
     max_tokens: 8192,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }]
