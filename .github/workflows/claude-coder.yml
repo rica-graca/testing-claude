@@ -15,13 +15,10 @@ jobs:
       - name: Checkout Codebase
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # Required for pushing new branches to GitHub
 
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2   # need previous commit to detect new files
-
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
@@ -32,5 +29,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional: MOCK_CLAUDE: 'true' (if you want to test without spending API credits)
         run: |
           node coder.js
