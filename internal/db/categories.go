@@ -16,7 +16,7 @@ func NewCategoryRepo(pool *pgxpool.Pool) *CategoryRepo {
 }
 
 func (r *CategoryRepo) List(ctx context.Context) ([]models.Category, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, name, color, created_at FROM category ORDER name`)
+	rows, err := r.pool.Query(ctx, `SELECT id, name, color, created_at FROM categories ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
