@@ -7,9 +7,9 @@
  */
 
 import fs from 'fs';
-import path from 'path';
-import { execSync } from 'child_process';
+import path from 'url';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -233,7 +233,7 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 Provide your changes.`;
 
   const msg = await anthropic.messages.create({
-    model: 'claude-3-5-sonnet-latest',
+    model: 'claude-3-5-sonnet-20241022',
     max_tokens: 8192,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }]
