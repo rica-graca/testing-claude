@@ -8,8 +8,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,15 +19,6 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const GITHUB_TOKEN      = process.env.GITHUB_TOKEN;
 const GITHUB_OWNER      = process.env.GITHUB_OWNER || process.env.GITHUB_REPOSITORY_OWNER;
 const GITHUB_REPO       = process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY?.split('/')[1];
-
-// Configurable model name defaulting to the widely accessible Claude 3.5 Sonnet v1
-let CLAUDE_MODEL      = process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-20240620';
-
-// Self-correction for common configuration typos (e.g., duplicate "claude" prefixes)
-if (CLAUDE_MODEL.startsWith('claudeclaude-')) {
-  console.log(`[coder] Normalizing misconfigured model name: "${CLAUDE_MODEL}" -> "${CLAUDE_MODEL.replace(/^claudeclaude-/, 'claude-')}"`);
-  CLAUDE_MODEL = CLAUDE_MODEL.replace(/^claudeclaude-/, 'claude-');
-}
 
 if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
   console.error('[coder] Error: Missing required GitHub environment variables.');
@@ -52,7 +43,6 @@ try {
 
 async function runAgent() {
   console.log(`[coder] Starting development cycle for ${GITHUB_OWNER}/${GITHUB_REPO}...`);
-  console.log(`[coder] Primary Target Model: ${CLAUDE_MODEL}`);
 
   // Step 1: Find the next open User Story
   const issues = await fetchOpenUserStories();
@@ -242,67 +232,28 @@ ${codebaseContext || 'No existing files. Create the initial directory structure.
 
 Provide your changes.`;
 
-  // Define a comprehensive prioritized cascade of model variations
-  const modelCascade = [
-    CLAUDE_MODEL,
-    'claude-3-5-sonnet-latest',   // Dynamic Sonnet
-    'claude-3-5-sonnet-20241022', // Sonnet v2
-    'claude-3-5-sonnet-20240620', // Sonnet v1
-    'claude-3-5-haiku-latest',    // Dynamic Haiku v2
-    'claude-3-5-haiku-20241022',  // Haiku v2
-    'claude-3-haiku-20240307',    // Haiku v1
-    'claude-3-opus-latest',       // Dynamic Opus
-    'claude-3-opus-20240229',     // Opus v1
-    'claude-3-sonnet-20240229'    // Legacy Sonnet v1
-  ];
+  const msg = await anthropic.messages.create({
+    model: 'claude-3-5-sonnet-latest',
+    max_tokens: 8192,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }]
+  });
 
-  // Remove duplicates & ensure formatting is normalized
-  const uniqueModels = [...new Set(modelCascade.map(m => m ? m.trim() : '').filter(Boolean))];
-  let lastError = null;
-
-  for (const model of uniqueModels) {
-    try {
-      console.log(`[coder] Attempting generation with model: ${model}...`);
-      
-      const msg = await anthropic.messages.create({
-        model: model,
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }]
-      });
-
-      const raw = msg.content.map(b => b.text || '').join('');
-      
-      // Extract block cleanly starting with the first curly brace and ending with the last
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
-      }
-
-      const clean = jsonMatch[0].trim();
-      const parsed = JSON.parse(clean);
-      
-      console.log(`[coder] Successfully generated implementation using model: ${model}!`);
-      return parsed;
-
-    } catch (err) {
-      console.warn(`[coder] Warning: Model "${model}" failed or is unavailable in your API tier. (${err.message})`);
-      lastError = err;
-      // Continue to the next model in the list
-    }
+  const raw = msg.content.map(b => b.text || '').join('');
+  
+  // Extract block cleanly starting with the first curly brace and ending with the last
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error(`Claude response did not contain a valid JSON object block. Raw output: ${raw.slice(0, 200)}`);
   }
 
-  // If everything failed, print a detailed environments diagnostics payload to aid local debugging
-  console.error('\n' + '='.repeat(60));
-  console.error('[coder] DIAGNOSTICS: ALL ANTHROPIC MODELS FAILED!');
-  console.error('This generally indicates an endpoint mapping issue or workspace-level model blocks.');
-  console.error(`- ANTHROPIC_BASE_URL: ${process.env.ANTHROPIC_BASE_URL || 'Not Set (Direct API)'}`);
-  console.error(`- HTTP_PROXY: ${process.env.HTTP_PROXY || 'Not Set'}`);
-  console.error(`- HTTPS_PROXY: ${process.env.HTTPS_PROXY || 'Not Set'}`);
-  console.error(`- Node version: ${process.version}`);
-  console.error('='.repeat(60) + '\n');
+  const clean = jsonMatch[0].trim();
 
-  throw new Error(`All models in fallback cascade failed to execute. Last recorded error: ${lastError ? lastError.message : 'Unknown'}`);
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    throw new Error(`Failed parsing Claude JSON output: ${clean.slice(0, 200)}`);
+  }
 }
 
 function applyChanges(files) {
